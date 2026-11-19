@@ -4,7 +4,7 @@
 [![rank](https://make.fun/badge/token-radar-01/Antrezur/Token-Radar/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 [![reward](https://make.fun/badge/token-radar-01/Antrezur/Token-Radar/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 
-Token Radar: a static dashboard that ranks pre-token protocols by implied value and shows how to farm each one. It reads a sealed DefiLlama snapshot (758 protocols, 40 on the watchlist), scores every protocol that passes the watchlist's own pre-token rule with the radar-2 model — TVL, 7-day growth, growth vs its category's median, age with no token, and chain breadth — and writes a ranked board with an 8-step farm plan per protocol. The dashboard is a plain static page with no network: board, detail view, filters, and a live-token view set aside from the ranking.
+Token Radar: a static dashboard that ranks pre-token protocols by implied value and shows how to farm each one. It reads a sealed DefiLlama snapshot (758 protocols, 40 on the watchlist), scores every protocol that passes the watchlist's own pre-token rule with the radar-3 model — a size curve fitted on the snapshot's own traded tokens (comps), validated leave-one-out against a flat-multiple baseline, with P10–P90 bands from 200 bootstrap refits — and writes a ranked board with an 8-step farm plan per protocol, each netted to cost, expected value, net $ and $/hour with a FARM / THIN / SKIP verdict. The dashboard is a plain static page with no network: board, detail view, filters, and a live-token view set aside from the ranking.
 
 ## Run it
 
