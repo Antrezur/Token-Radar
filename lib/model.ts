@@ -173,6 +173,7 @@ export interface RadarData {
   category_medians: Record<string, number>;
   overall_median: number;
   watchlist_slugs: string[];
+  top_gainers: RadarRow[];
   rows: RadarRow[];
   live: LiveRow[];
 }
@@ -542,6 +543,13 @@ export function radarRow(row: BoardRow): RadarRow {
   };
 }
 
+/** The three board rows with the strongest 7-day TVL growth, strongest first. */
+export function topGainers(board: BoardRow[]): RadarRow[] {
+  return board.filter((r) => r.change_7d !== null)
+    .sort((a, b) => (b.change_7d ?? 0) - (a.change_7d ?? 0) || b.implied_value_usd - a.implied_value_usd)
+    .slice(0, 3).map(radarRow);
+}
+
 /** Everything the dashboard renders, from the snapshot. */
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
   const board = buildBoard(snapshot, model);
@@ -561,6 +569,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     category_medians: byCategory,
     overall_median: overall,
     watchlist_slugs: snapshot.watchlist,
+    top_gainers: topGainers(board),
     rows: board.map(radarRow),
     live,
   };

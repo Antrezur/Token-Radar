@@ -75,6 +75,13 @@ a { color: var(--accent); }
 .spot-card .val { font-family: var(--font-num); font-size: 17px; font-weight: 600; }
 .spot-card .sub { color: var(--muted); font-size: 12px; }
 
+.gain { display: flex; align-items: center; gap: var(--step-3); padding-bottom: var(--step-4); }
+.gain-label { font-family: var(--font-num); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); flex: none; }
+.gain-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-panel); padding: var(--step-3) var(--step-4); display: flex; align-items: baseline; gap: var(--step-3); text-align: left; }
+.gain-card:hover { border-color: var(--accent); }
+.gain-card b { font-size: 14px; font-weight: 650; }
+.gain-card .pos { font-family: var(--font-num); font-size: 14px; font-weight: 600; }
+
 .controls { display: flex; flex-wrap: wrap; align-items: end; gap: var(--step-3); padding: var(--step-4) 0; border-top: 1px solid var(--border); }
 .field { display: grid; gap: var(--step-1); }
 .field label { color: var(--muted); font-size: 12px; }

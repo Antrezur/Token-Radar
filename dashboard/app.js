@@ -271,6 +271,17 @@
     );
   }
 
+  function gainers() {
+    return el('section', { class: 'gain', 'aria-label': 'Top three by seven-day growth' },
+      el('span', { class: 'gain-label', text: 'Top gainers · 7d' }),
+      (DATA.top_gainers || []).map(function (r) {
+        return el('button', { type: 'button', class: 'gain-card', onclick: function () { openDetail(r.slug); } },
+          el('b', { text: r.name }),
+          el('span', { class: 'pos', text: fmtPct(r.change_7d) }),
+          el('span', { class: 'sub', text: 'Implied ' + fmtUsd(r.implied_value_usd) }));
+      }));
+  }
+
   function controls() {
     var categories = Array.from(new Set(DATA.rows.map(function (r) { return r.category || 'Other'; }))).sort();
     var chains = Array.from(new Set(DATA.rows.reduce(function (acc, r) { return acc.concat(r.chains || []); }, []))).sort();
@@ -488,6 +499,7 @@
     shell.appendChild(header());
     shell.appendChild(lede());
     shell.appendChild(spotlight());
+    shell.appendChild(gainers());
     shell.appendChild(controls());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
     if (state.tab === 'pre-token') {
