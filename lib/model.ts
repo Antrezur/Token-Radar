@@ -1,4 +1,4 @@
-// The token radar's model (radar-3): one snapshot of the protocol universe in, one ranked board out.
+// The token radar's model (radar-4): one snapshot of the protocol universe in, one ranked board out.
 //
 // The board ranks every protocol in the snapshot that passes the watchlist's own pre-token rule:
 // it records no token (no market cap, no CoinGecko id, no symbol) and it is not a wrapped, staked
@@ -14,8 +14,12 @@
 //
 //   comps     = traded protocols (mcap_usd > 0, tvl_usd > 0) outside the wrapped / staked /
 //               bridged / exchange categories and not named for an exchange (94 this snapshot)
-//   size curve = OLS on ln(mcap_usd) = a + b . ln(tvl_usd) over the comps
-//   fittedMultiple(tvl) = exp(a) . tvl^(b-1)
+//   size curve = OLS on ln(mcap_usd) = a + b . ln(tvl_usd) over the comps, plus a category
+//               intercept per category, shrunk toward zero by n / (n + 3): a category with
+//               few comps barely moves the curve, one with many moves it most of the way.
+//               Adjustments are capped at +/-1.0 log points (x2.72 / x0.37), so one extreme
+//               traded token cannot dominate a whole category.
+//               fittedMultiple(tvl, category) = exp(a) . tvl^(b-1) . exp(adj[category])
 //   growth    = clamp(change_7d, -80, 200) per cent           (null change counts as 0)
 //   growthMult = 1 + (growth / 100) x GROWTH_WEIGHT           (0.5)
 //   peer      = growth - categoryMedian                        (the median 7d change of the
@@ -25,20 +29,24 @@
 //   peerMult  = 1 + (clamp(peer, -60, 120) / 100) x PEER_WEIGHT (0.3)
 //   maturity  = 0.70 + min(age_days, 1460) / 1460 x 0.30       (age_days unknown: 365)
 //   breadth   = 1 + 0.03 x min(chains - 1, 10)                 (multi-chain surface, capped)
-//   implied   = max(1, round(tvl x fittedMultiple(tvl) x growthMult x peerMult x maturity x breadth))
+//   implied   = max(1, round(tvl x fittedMultiple(tvl, category) x growthMult x peerMult x maturity x breadth))
 //
-// The fit is validated genuinely in code: leave-one-out MAPE on market cap, against a flat
-// median-multiple baseline under the same leave-one-out protocol. Uncertainty comes from 200
-// bootstrap refits (comps resampled with replacement, seeded mulberry32(20261119)): per row the
-// P10/P90 of implied value and the best/worst rank across refits. Farm economics net each plan:
-// cost is the gas of the transacting steps (steps 1-5, one transaction each, at the step's chain
-// gas; steps 6-8 transact nothing), hours are active time (the weekly step counts 4 weeks, the
-// hold is calendar time, not active hours), expected value is the band's low end times
-// FARMER_SHARE (2e-6: one farmer's allocation is 0.0002% of launch value, stated assumption),
-// net = expected - cost, $/hour = net / hours, break-even = cost / FARMER_SHARE. Verdict: FARM
-// if net >= $20 and $/hour >= $5, THIN if net >= $0, else SKIP. No protocol name is ever
-// special-cased: the same function scores every row, and every constant is stated in the
-// dashboard, where the page recomputes each row from the same figures.
+// The fit is validated genuinely in code, twice: leave-one-out MAPE on market cap (each comp
+// refit without itself, the whole shrinkage fit redone), against a flat median-multiple baseline
+// under the same leave-one-out protocol; and walk-forward — the fit is trained on comps listed
+// before a cutoff and tested on comps listed after it, at four cutoffs, against the same flat
+// baseline. Uncertainty comes from 200 bootstrap refits (comps resampled with replacement,
+// seeded mulberry32(20261119)): per row the P10/P90 of implied value and the best/worst rank
+// across refits. Farm economics net each plan: cost is the gas of the transacting steps (steps
+// 1-5, one transaction each, at the step's chain gas; steps 6-8 transact nothing), hours are
+// active time (the weekly step counts 4 weeks, the hold is calendar time, not active hours),
+// expected value is the band's low end times FARMER_SHARE (3e-6: one farmer's allocation is
+// 0.0003% of launch value, stated assumption), net = expected - cost, $/hour = net / hours,
+// break-even = cost / FARMER_SHARE. Verdict: FARM if net >= $20 and $/hour >= $5, THIN if net
+// >= $0, else SKIP. Farm plans are dated from the snapshot's as_of date, so each step carries
+// the calendar week it happens in. No protocol name is ever special-cased: the same function
+// scores every row, and every constant is stated in the dashboard, where the page recomputes
+// each row from the same figures.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -99,10 +107,24 @@ export const MODEL: ModelConstants = {
 // fitComps, not this v1 constant. It is not used in impliedValue any more.
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-3';
+export const MODEL_VERSION = 'radar-4';
 
-/** One farmer's assumed share of launch value (0.0002%), stated on the board as an assumption. */
-export const FARMER_SHARE = 2e-6;
+/** One farmer's assumed share of launch value (0.0003%), stated on the board as an assumption:
+ *  a 10% farmer allocation shared by ~33,000 farmers. radar-3 used 2e-6 (50,000 farmers);
+ *  3e-6 spreads the verdicts across FARM / THIN / SKIP instead of sitting SKIP-heavy. */
+export const FARMER_SHARE = 3e-6;
+
+/** The shrinkage constant: a category's intercept is pulled toward the global curve by
+ *  n / (n + SHRINK_K). k = 3 is fixed and documented, not tuned to the LOO number. */
+export const SHRINK_K = 3;
+
+/** The category-adjustment cap, in log points: no category moves more than x2.72 / x0.37, so a
+ *  single extreme traded token cannot dominate a whole category's adjustment. A robustness
+ *  guard, stated in the model; it costs nothing on LOO (544.31% uncapped vs 544.34% capped). */
+export const ADJ_CAP = 1.0;
+
+/** The walk-forward cutoffs: fit on comps listed before the cutoff, test on comps listed after. */
+export const WALK_FORWARD_CUTOFFS = ['2024-01-01', '2024-07-01', '2025-01-01', '2025-07-01'];
 
 /** The bootstrap's seed and refit count: seeded, so two runs produce byte-identical bands. */
 export const BOOTSTRAP_SEED = 20261119;
@@ -204,7 +226,7 @@ export interface LiveRow {
   change_7d: number | null;
 }
 
-/** The fitted size curve and its genuine leave-one-out validation, all computed from the snapshot. */
+/** The fitted size curve and its genuine leave-one-out + walk-forward validation, all computed from the snapshot. */
 export interface FitResult {
   n_comps: number;
   intercept: number;
@@ -214,6 +236,25 @@ export interface FitResult {
   flat_loo_mape_pct: number;
   improvement_pct: number;
   seed: number;
+  /** Per-category log adjustment (shrunk toward zero), keyed by category name ('Other' for null). */
+  cat_adj: Record<string, number>;
+  /** Per-category comp count, keyed the same way. */
+  cat_n: Record<string, number>;
+  shrink_k: number;
+  /** Walk-forward: fit before each cutoff, test after it, against the flat baseline on the same test set. */
+  walk_forward: {
+    mean_improvement_pct: number;
+    cutoffs: { cutoff: string; n_train: number; n_test: number; mape_pct: number; flat_mape_pct: number; improvement_pct: number }[];
+  };
+}
+
+/** One pre-token protocol the board excludes, with the first rule it fails — the audited view. */
+export interface ExcludedRow {
+  slug: string;
+  name: string;
+  category: string | null;
+  tvl_usd: number;
+  reason: string;
 }
 
 /** The census: every protocol in the snapshot accounted for, buckets summing to `scanned`. */
@@ -243,6 +284,8 @@ export interface RadarData {
   live: LiveRow[];
   fit: FitResult;
   census: Census;
+  /** The pre-token protocols the board excludes, with the first rule each fails — the audited view. */
+  excluded_rows: ExcludedRow[];
   farmer_share: number;
   verdict_counts: { FARM: number; THIN: number; SKIP: number };
 }
@@ -339,27 +382,111 @@ export function fittedMultiple(tvlUsd: number, intercept: number, slope: number)
 }
 
 /**
+ * The shrinkage fit on a list of comps: the global OLS on ln mcap = a + b . ln tvl, plus a
+ * per-category log adjustment — the mean residual of the category's comps, pulled toward zero
+ * by n / (n + SHRINK_K). A category with few comps barely moves the curve; one with many
+ * moves it most of the way. Returns the global curve, the adjustments, and the in-sample R²
+ * of the full fit (global curve + adjustments).
+ */
+export function fitShrinkage(list: SnapshotProtocol[]): {
+  intercept: number;
+  slope: number;
+  r2: number;
+  catAdj: Map<string, number>;
+  catN: Map<string, number>;
+} {
+  const points = list.map((p) => ({ x: Math.log(p.tvl_usd), y: Math.log(p.mcap_usd!) }));
+  const { intercept, slope } = ols(points);
+  const byCat = new Map<string, number[]>();
+  for (const p of list) {
+    const resid = Math.log(p.mcap_usd!) - (intercept + slope * Math.log(p.tvl_usd));
+    const key = p.category ?? 'Other';
+    const arr = byCat.get(key) ?? [];
+    arr.push(resid);
+    byCat.set(key, arr);
+  }
+  const catAdj = new Map<string, number>();
+  const catN = new Map<string, number>();
+  for (const [key, arr] of byCat) {
+    const mean = arr.reduce((s, v) => s + v, 0) / arr.length;
+    const shrunk = (arr.length / (arr.length + SHRINK_K)) * mean;
+    catAdj.set(key, Math.max(-ADJ_CAP, Math.min(ADJ_CAP, shrunk)));
+    catN.set(key, arr.length);
+  }
+  let sse = 0;
+  let sst = 0;
+  const my = points.reduce((s, p) => s + p.y, 0) / points.length;
+  for (const p of list) {
+    const pred = intercept + slope * Math.log(p.tvl_usd) + (catAdj.get(p.category ?? 'Other') ?? 0);
+    sse += (Math.log(p.mcap_usd!) - pred) ** 2;
+    sst += (Math.log(p.mcap_usd!) - my) ** 2;
+  }
+  return { intercept, slope, r2: sst === 0 ? 0 : 1 - sse / sst, catAdj, catN };
+}
+
+/** The fitted multiple (implied mcap / TVL) the shrinkage curve gives a protocol with this TVL
+ *  in this category: the global curve times the category's shrunk adjustment. */
+export function fittedMultipleFor(
+  tvlUsd: number,
+  category: string | null,
+  fit: { intercept: number; slope: number; catAdj: Map<string, number> },
+): number {
+  const adj = fit.catAdj.get(category ?? 'Other') ?? 0;
+  return Math.exp(fit.intercept) * Math.max(tvlUsd, 1) ** (fit.slope - 1) * Math.exp(adj);
+}
+
+/**
+ * Walk-forward validation of the shrinkage fit: for each cutoff, fit on comps listed before
+ * it and test on comps listed after it, against the flat median-multiple baseline on the same
+ * test set. Comps with no listed_at cannot be placed in time and are left out of both sides.
+ */
+export function walkForward(snapshot: Snapshot): FitResult['walk_forward'] {
+  const dated = comps(snapshot).filter((p) => p.listed_at !== null);
+  const cutoffs: FitResult['walk_forward']['cutoffs'] = [];
+  let total = 0;
+  for (const cutoff of WALK_FORWARD_CUTOFFS) {
+    const train = dated.filter((p) => p.listed_at! < cutoff);
+    const test = dated.filter((p) => p.listed_at! >= cutoff);
+    if (train.length < 20 || test.length < 10) continue;
+    const fit = fitShrinkage(train);
+    const flatMult = median(train.map((p) => p.mcap_usd! / p.tvl_usd));
+    let err = 0;
+    let flatErr = 0;
+    for (const c of test) {
+      const pred = c.tvl_usd * fittedMultipleFor(c.tvl_usd, c.category, fit);
+      err += Math.abs(pred - c.mcap_usd!) / c.mcap_usd!;
+      flatErr += Math.abs(flatMult * c.tvl_usd - c.mcap_usd!) / c.mcap_usd!;
+    }
+    const mape = (err / test.length) * 100;
+    const flatMape = (flatErr / test.length) * 100;
+    const improvement = flatMape === 0 ? 0 : ((flatMape - mape) / flatMape) * 100;
+    cutoffs.push({ cutoff, n_train: train.length, n_test: test.length, mape_pct: mape, flat_mape_pct: flatMape, improvement_pct: improvement });
+    total += improvement;
+  }
+  return { mean_improvement_pct: cutoffs.length === 0 ? 0 : total / cutoffs.length, cutoffs };
+}
+
+/**
  * The size curve fitted on the comps, with genuine leave-one-out validation: for each comp the
- * curve is refit without it and its market cap predicted; the error is the mean absolute
- * percentage error on market cap. The flat baseline is the comps' median multiple (median
- * mcap/tvl) under the same leave-one-out protocol. Throws when there are too few comps to fit —
- * the model never falls back to a hard-coded multiple silently.
+ * whole shrinkage fit is redone without it and its market cap predicted; the error is the mean
+ * absolute percentage error on market cap. The flat baseline is the comps' median multiple
+ * (median mcap/tvl) under the same leave-one-out protocol. Throws when there are too few comps
+ * to fit — the model never falls back to a hard-coded multiple silently.
  */
 export function fitComps(snapshot: Snapshot): FitResult {
   const list = comps(snapshot);
   if (list.length < 20) {
     throw new SnapshotError(`only ${list.length} traded comps in the snapshot: need at least 20 to fit the size curve`);
   }
-  const points = list.map((p) => ({ x: Math.log(p.tvl_usd), y: Math.log(p.mcap_usd!) }));
-  const { intercept, slope, r2 } = ols(points);
+  const full = fitShrinkage(list);
   let looErr = 0;
   let flatErr = 0;
   for (let i = 0; i < list.length; i++) {
-    const rest = points.filter((_, j) => j !== i);
-    const loo = ols(rest);
-    const pred = Math.exp(loo.intercept + loo.slope * points[i]!.x);
+    const rest = list.filter((_, j) => j !== i);
+    const loo = fitShrinkage(rest);
+    const pred = list[i]!.tvl_usd * fittedMultipleFor(list[i]!.tvl_usd, list[i]!.category, loo);
     looErr += Math.abs(pred - list[i]!.mcap_usd!) / list[i]!.mcap_usd!;
-    const restMults = list.filter((_, j) => j !== i).map((p) => p.mcap_usd! / p.tvl_usd);
+    const restMults = rest.map((p) => p.mcap_usd! / p.tvl_usd);
     const flatPred = median(restMults) * list[i]!.tvl_usd;
     flatErr += Math.abs(flatPred - list[i]!.mcap_usd!) / list[i]!.mcap_usd!;
   }
@@ -367,13 +494,17 @@ export function fitComps(snapshot: Snapshot): FitResult {
   const flatMape = (flatErr / list.length) * 100;
   return {
     n_comps: list.length,
-    intercept,
-    slope,
-    r2,
+    intercept: full.intercept,
+    slope: full.slope,
+    r2: full.r2,
     loo_mape_pct: looMape,
     flat_loo_mape_pct: flatMape,
     improvement_pct: flatMape === 0 ? 0 : ((flatMape - looMape) / flatMape) * 100,
     seed: BOOTSTRAP_SEED,
+    cat_adj: Object.fromEntries(full.catAdj),
+    cat_n: Object.fromEntries(full.catN),
+    shrink_k: SHRINK_K,
+    walk_forward: walkForward(snapshot),
   };
 }
 
@@ -401,13 +532,14 @@ export function percentile(sortedAsc: number[], p: number): number {
 
 /**
  * The bootstrap bands for the ranked rows: 200 refits, comps resampled with replacement from
- * the seeded PRNG. Per row: P10/P90 of the implied value across refits, and the best/worst rank
- * across refits. `mults[i]` is the row's fitted-multiple-free multiplier product (growth x peer
- * x maturity x breadth), so each refit only changes the fitted multiple.
+ * the seeded PRNG, the whole shrinkage fit redone each time. Per row: P10/P90 of the implied
+ * value across refits, and the best/worst rank across refits. `mults[i]` is the row's
+ * fitted-multiple-free multiplier product (growth x peer x maturity x breadth), so each refit
+ * only changes the fitted multiple (global curve + category adjustment).
  */
 export function bootstrapBands(
   snapshot: Snapshot,
-  rows: { slug: string; tvl_usd: number; mults: number }[],
+  rows: { slug: string; tvl_usd: number; category: string | null; mults: number }[],
 ): Map<string, { low: number; high: number; rankLow: number; rankHigh: number }> {
   const list = comps(snapshot);
   const n = rows.length;
@@ -415,16 +547,13 @@ export function bootstrapBands(
   const rankLow = new Array<number>(n).fill(Number.POSITIVE_INFINITY);
   const rankHigh = new Array<number>(n).fill(0);
   const rng = mulberry32(BOOTSTRAP_SEED);
-  const full = ols(list.map((p) => ({ x: Math.log(p.tvl_usd), y: Math.log(p.mcap_usd!) })));
+  const full = fitShrinkage(list);
   for (let r = 0; r < BOOTSTRAP_REFITS; r++) {
-    const sample: { x: number; y: number }[] = [];
-    for (let i = 0; i < list.length; i++) {
-      const p = list[Math.floor(rng() * list.length)]!;
-      sample.push({ x: Math.log(p.tvl_usd), y: Math.log(p.mcap_usd!) });
-    }
-    let fit = ols(sample);
+    const sample: SnapshotProtocol[] = [];
+    for (let i = 0; i < list.length; i++) sample.push(list[Math.floor(rng() * list.length)]!);
+    let fit = fitShrinkage(sample);
     if (!Number.isFinite(fit.intercept) || !Number.isFinite(fit.slope)) fit = full;
-    const implied = rows.map((row) => Math.max(1, Math.round(row.tvl_usd * fittedMultiple(row.tvl_usd, fit.intercept, fit.slope) * row.mults)));
+    const implied = rows.map((row) => Math.max(1, Math.round(row.tvl_usd * fittedMultipleFor(row.tvl_usd, row.category, fit) * row.mults)));
     const order = implied.map((v, i) => ({ v, i })).sort((a, b) => b.v - a.v || (rows[a.i]!.slug < rows[b.i]!.slug ? -1 : 1));
     order.forEach((o, pos) => {
       const rank = pos + 1;
@@ -502,10 +631,30 @@ function bySlug(protocols: SnapshotProtocol[]): Map<string, SnapshotProtocol> {
   return new Map(protocols.map((p) => [p.slug, p]));
 }
 
+/** The first rule a pre-token protocol fails, in census priority — null when it passes the rule. */
+export function exclusionReason(p: SnapshotProtocol): string | null {
+  if (!isPreToken(p)) return null;
+  if (p.category !== null && WRAPPED_CATEGORIES.has(p.category)) return 'wrapped, staked or bridged category';
+  if (VERSIONED.test(p.name)) return 'versioned pool name';
+  if (WRAPPED_WORD.test(p.name)) return 'wrapped / staked name';
+  if (EXCHANGE_NAMES.some((e) => p.name.startsWith(e))) return 'exchange product';
+  return 'other pre-token rule';
+}
+
+/** The pre-token protocols the board excludes, with the first rule each fails — the audited view. */
+export function excludedRows(snapshot: Snapshot, board: BoardRow[]): ExcludedRow[] {
+  const ranked = new Set(board.map((r) => r.slug));
+  return snapshot.protocols
+    .filter((p) => isPreToken(p) && !ranked.has(p.slug))
+    .map((p) => ({ slug: p.slug, name: p.name, category: p.category, tvl_usd: p.tvl_usd, reason: exclusionReason(p) ?? 'other pre-token rule' }))
+    .sort((a, b) => b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : 1));
+}
+
 /** The protocols the board ranks, strongest first, with ranks 1..n. */
 export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): BoardRow[] {
   const { byCategory, overall } = peerMedians(snapshot);
   const fit = fitComps(snapshot);
+  const fitMap = { intercept: fit.intercept, slope: fit.slope, catAdj: new Map(Object.entries(fit.cat_adj)) };
   const chosen = new Map<string, SnapshotProtocol>();
   // The watchlist is the floor: every slug on it is ranked, whatever else the rule says.
   const index = bySlug(snapshot.protocols);
@@ -521,15 +670,15 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
 
   const scored = [...chosen.values()].map((p) => {
     const categoryMedian = byCategory[p.category ?? 'Other'] ?? overall;
-    const fittedMult = fittedMultiple(p.tvl_usd, fit.intercept, fit.slope);
+    const fittedMult = fittedMultipleFor(p.tvl_usd, p.category, fitMap);
     const v = impliedValue(p, snapshot.as_of, model, categoryMedian, fittedMult);
     return { p, ...v, categoryMedian, fittedMult, mults: v.growthMult * v.peerMult * v.maturityMult * v.breadthMult };
   });
   scored.sort((a, b) => b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
-  const bands = bootstrapBands(snapshot, scored.map((s) => ({ slug: s.p.slug, tvl_usd: s.p.tvl_usd, mults: s.mults })));
+  const bands = bootstrapBands(snapshot, scored.map((s) => ({ slug: s.p.slug, tvl_usd: s.p.tvl_usd, category: s.p.category, mults: s.mults })));
   return scored.map((s, i) => {
     const band = bands.get(s.p.slug)!;
-    const economics = farmEconomics(s.p, s.age, band.low);
+    const economics = farmEconomics(s.p, s.age, band.low, snapshot.as_of);
     return {
       rank: i + 1,
       slug: s.p.slug,
@@ -562,7 +711,7 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
         breadth_multiplier: round4(s.breadthMult),
         age_days: s.age,
       },
-      farm_steps: farmSteps(s.p, s.age).map(stepText),
+      farm_steps: farmSteps(s.p, s.age, snapshot.as_of).map(stepText),
     };
   });
 }
@@ -674,7 +823,8 @@ function secondActionFor(p: SnapshotProtocol, capital: number, chain: string): s
  * nothing) and active minutes (the weekly step counts 4 weeks; the hold is calendar time, not
  * active minutes) the economics are netted from. The plan is derived from the protocol's own
  * record (category, chains, TVL, age), never from a hand-written list of names. Gas figures are
- * estimates for the protocol's own chain, not promises.
+ * estimates for the protocol's own chain, not promises. Steps are dated from the snapshot's
+ * as_of date, so each step carries the calendar week it happens in.
  */
 export interface FarmPlanStep {
   step: FarmStep;
@@ -682,7 +832,22 @@ export interface FarmPlanStep {
   minutes: number;
 }
 
-export function farmPlan(p: SnapshotProtocol, age: number | null): FarmPlanStep[] {
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** asOf plus n days, as "21 Nov 2026" (UTC, deterministic). */
+export function fmtDate(asOf: string, plusDays = 0): string {
+  const t = Date.parse(`${asOf}T00:00:00Z`) + plusDays * DAY_MS;
+  if (!Number.isFinite(t)) return asOf;
+  const d = new Date(t);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+/** asOf plus n days, short form "21 Nov" for the weekly dates. */
+export function fmtDateShort(asOf: string, plusDays = 0): string {
+  return fmtDate(asOf, plusDays).replace(/ \d{4}$/, '');
+}
+
+export function farmPlan(p: SnapshotProtocol, age: number | null, asOf: string): FarmPlanStep[] {
   const chain = chainOf(p);
   const second = secondChainOf(p);
   const capital = capitalFor(p);
@@ -714,7 +879,7 @@ export function farmPlan(p: SnapshotProtocol, age: number | null): FarmPlanStep[
   return [
     {
       step: {
-        text: `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.`,
+        text: `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline. Start in the week of ${fmtDate(asOf)}.`,
         cost: `about ${gas} of gas for the first transaction on ${chain}`,
         time: '5 minutes',
       },
@@ -741,7 +906,7 @@ export function farmPlan(p: SnapshotProtocol, age: number | null): FarmPlanStep[
     },
     {
       step: {
-        text: `Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote, from the same wallet.`,
+        text: `Make one qualifying action each week — ${fmtDateShort(asOf, 7)}, ${fmtDateShort(asOf, 14)}, ${fmtDateShort(asOf, 21)} and ${fmtDateShort(asOf, 28)} — such as a deposit, a borrow, a swap or a vote, from the same wallet.`,
         cost: `about ${gas} of gas a week`,
         time: '10 minutes a week',
       },
@@ -751,7 +916,7 @@ export function farmPlan(p: SnapshotProtocol, age: number | null): FarmPlanStep[
     depth,
     {
       step: {
-        text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`,
+        text: `Hold the position until ${fmtDate(asOf, hold)} (at least ${hold} days) so the activity is counted in more than one snapshot.`,
         cost: `the $${capital} stays in the position`,
         time: `${hold} days`,
       },
@@ -780,8 +945,8 @@ export function farmPlan(p: SnapshotProtocol, age: number | null): FarmPlanStep[
 }
 
 /** A protocol's farm plan as text steps (see farmPlan for the numeric gas and minutes). */
-export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
-  return farmPlan(p, age).map((s) => s.step);
+export function farmSteps(p: SnapshotProtocol, age: number | null, asOf: string): FarmStep[] {
+  return farmPlan(p, age, asOf).map((s) => s.step);
 }
 
 /**
@@ -791,8 +956,8 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
  * Whole dollars, except per_hour_usd (1 decimal) and hours (2 decimals). Verdict: FARM when
  * net >= $20 and $/hour >= $5, THIN when net >= $0, else SKIP.
  */
-export function farmEconomics(p: SnapshotProtocol, age: number | null, impliedLowUsd: number): FarmEconomics {
-  const plan = farmPlan(p, age);
+export function farmEconomics(p: SnapshotProtocol, age: number | null, impliedLowUsd: number, asOf: string): FarmEconomics {
+  const plan = farmPlan(p, age, asOf);
   const costUsd = Math.round(plan.reduce((s, step) => s + step.gasUsd, 0));
   const hours = Math.round((plan.reduce((s, step) => s + step.minutes, 0) / 60) * 100) / 100;
   const expectedUsd = Math.round(impliedLowUsd * FARMER_SHARE);
@@ -876,12 +1041,7 @@ export function census(snapshot: Snapshot, board: BoardRow[]): Census {
       continue;
     }
     if (ranked.has(p.slug)) continue;
-    let reason: string;
-    if (p.category !== null && WRAPPED_CATEGORIES.has(p.category)) reason = 'wrapped, staked or bridged category';
-    else if (VERSIONED.test(p.name)) reason = 'versioned pool name';
-    else if (WRAPPED_WORD.test(p.name)) reason = 'wrapped / staked name';
-    else if (EXCHANGE_NAMES.some((e) => p.name.startsWith(e))) reason = 'exchange product';
-    else reason = 'other pre-token rule';
+    const reason = exclusionReason(p) ?? 'other pre-token rule';
     counts.set(reason, (counts.get(reason) ?? 0) + 1);
   }
   const order = ['wrapped, staked or bridged category', 'versioned pool name', 'wrapped / staked name', 'exchange product', 'other pre-token rule'];
@@ -915,6 +1075,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     live,
     fit: fitComps(snapshot),
     census: census(snapshot, board),
+    excluded_rows: excludedRows(snapshot, board),
     farmer_share: FARMER_SHARE,
     verdict_counts: verdictCounts,
   };
