@@ -1,5 +1,4 @@
-/* Token Radar's dark theme. Eight palette values, two radii and two families are the whole style;
-   everything else is spacing, a hairline and a type step. No external font, no image, no network. */
+/* Token Radar's dark theme. No external font, no image, no network. */
 :root {
   --canvas: #0c120f;
   --surface: #131c17;
