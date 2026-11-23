@@ -1,53 +1,13 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar: category-fit launch values x peer launch odds, blind-tested twice, netted farm plans</title>
+<title>Token Radar: shrunk category-fit launch pricing, walk-forward-tested, launch odds shown not multiplied, 34 netted farm plans</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<a class="skip" href="#board">Skip to the board</a>
-<main id="app">
-  <header>
-    <h1>Token Radar: category-fit launch values x peer launch odds, blind-tested twice, netted farm plans</h1>
-    <p class="lede">Implied value from a size curve fitted on 94 traded tokens and tested blind, times the chance a protocol like it ever issues a token; every farm plan netted to a FARM / THIN / SKIP verdict.</p>
-    <div id="kpis" class="kpis"></div>
-    <div id="census" class="census"></div>
-  </header>
-  <section id="spotlight" class="spotlight"></section>
-  <section id="gainers" class="gainers"></section>
-  <section class="controls" aria-label="Board controls">
-    <input id="q" type="search" placeholder="Search name or slug" aria-label="Search name or slug">
-    <select id="category" aria-label="Category"><option value="">All categories</option></select>
-    <select id="chain" aria-label="Chain"><option value="">All chains</option></select>
-    <select id="verdict" aria-label="Verdict"><option value="">All verdicts</option><option>FARM</option><option>THIN</option><option>SKIP</option></select>
-    <label class="watchonly"><input id="watchonly" type="checkbox"> Watchlist only</label>
-    <span id="count" class="count"></span>
-  </section>
-  <div class="tabs" role="tablist">
-    <button id="tab-board" role="tab" aria-selected="true">Board</button>
-    <button id="tab-live" role="tab" aria-selected="false">Live tokens</button>
-    <button id="tab-proof" role="tab" aria-selected="false">Model proof</button>
-    <button id="tab-guide" role="tab" aria-selected="false">Reading guide</button>
-  </div>
-  <section id="board-wrap">
-    <table id="board">
-      <thead><tr>
-        <th data-sort="rank">Rank</th><th data-sort="name">Protocol</th><th data-sort="category">Category</th>
-        <th data-sort="chains">Chains</th><th data-sort="tvl_usd">TVL</th><th data-sort="change_7d">7d</th>
-        <th data-sort="implied_value_usd">Expected value</th><th data-sort="raw_value_usd">Launch value</th>
-        <th data-sort="launch_odds">Launch odds</th><th data-sort="implied_low_usd">P10–P90 band</th>
-        <th data-sort="verdict">Verdict</th>
-      </tr></thead>
-      <tbody id="rows"></tbody>
-    </table>
-  </section>
-  <section id="live-wrap" hidden><table id="live"><thead><tr><th>Protocol</th><th>Category</th><th>Chains</th><th>TVL</th><th>Market cap</th><th>7d</th></tr></thead><tbody id="live-rows"></tbody></table></section>
-  <section id="proof-wrap" hidden><div id="proof"></div></section>
-  <section id="guide-wrap" hidden><div id="guide"></div></section>
-  <dialog id="detail"><div id="detail-body"></div><button id="detail-close">Close</button></dialog>
-</main>
+<main id="app" aria-busy="true"></main>
 <script src="../data.js"></script>
 <script src="app.js"></script>
 </body>
